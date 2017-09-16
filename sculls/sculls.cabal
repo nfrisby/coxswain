@@ -1,0 +1,66 @@
+name: sculls
+version: 0.1.0.0
+synopsis: Records and variants using coxswain
+description:
+
+  Records and variants using the @coxswain@ package's row types.
+
+  .
+
+  Don't forget to set the @-fplugin=Coxswain@ flag for GHC!
+
+  .
+
+  An anonymous record type ("Data.Sculls.Record") interprets a row as
+  a product (think: tuples with named components where the order
+  doesn't matter). An anonymous variant type ("Data.Sculls.Variant")
+  interprets a row as a sum (think: nestings of 'Either' with less
+  noise where the order doesn't matter).
+
+  .
+
+  In this library, both records and variants are indexed by a /field/
+  /type/ ("Data.Sculls.Field"), so that the data types can have more
+  structure beyond their row type. In particular, this permits some
+  @Applicative@ like combinators for records. For example, @\\r s ->
+  getAll $ rfold $ (A $ \\Dict -> A $ \\(I x) -> A $ \\(I y) -> C (All
+  (x == y))) \/$\\ rdict (Proxy :: Proxy Eq) \/*\\ r \/*\\ s@ tests
+  two records for equality; its inferred type is @forall (p :: Row
+  k). RAll (OnValue Eq) (Normalize p) (NumCols p) => R I p -> R I p ->
+  Bool@.
+
+license:             BSD3
+license-file:        LICENSE
+author:              Nicolas Frisby
+maintainer:          nicolas.frisby@gmail.com
+category:            Data
+build-type:          Simple
+cabal-version:       >=1.10
+
+library
+  default-language: Haskell2010
+  hs-source-dirs:src
+  build-depends:
+      base >=4.10 && <4.11
+    , coxswain
+    , template-haskell
+  exposed-modules:
+    Data.Sculls
+    Data.Sculls.Field
+    Data.Sculls.Record
+    Data.Sculls.Variant
+    Data.Sculls.Symbol
+    -- The following modules should not be imported in typical use.
+    Data.Sculls.Internal.Classes
+    Data.Sculls.Internal.RecordAndVariant
+    Data.Sculls.Internal.RecordAndVariantTH
+    Data.Sculls.Internal.ShortVector
+    Data.Sculls.Internal.ShortVectorTH
+    Data.Sculls.Internal.Shower
+    Data.Sculls.Internal.TH
+  ghc-options:
+    -Werror
+    -Wall
+    -Wincomplete-uni-patterns
+    -Wincomplete-record-updates
+--    -Wmissing-import-lists   -- I don't want this, at least not yet.

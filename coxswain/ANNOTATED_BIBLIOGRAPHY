@@ -1,0 +1,358 @@
+= "Improving Haskell Types with SMT" Iavor S. Diatchki
+
+Section 4.6 "If all constraints in scope are given constraints, then
+we also generate given equalities, otherwise we generate derived
+equalities."
+
+Section 4.7 ["The solver" here is the SMT solver.] "During the solving
+stage, we mark the solver's state after we've asserted the givens,
+then we assert the new goals, check for consistency, and improvement,
+and then, before solving, revert back to the state where only the
+givens are asserted."
+
+= Var.hs
+
+> data Var
+>   = TyVar {  -- Type and kind variables
+>              -- see Note [Kind and type variables]
+>         varName    :: !Name,
+>         realUnique :: {-# UNPACK #-} !Int,
+>                                      -- ^ Key for fast comparison
+>                                      -- Identical to the Unique in the name,
+>                                      -- cached here for speed
+>         varType    :: Kind           -- ^ The type or kind of the 'Var' in question
+>  }
+>
+>   | TcTyVar {                           -- Used only during type inference
+>                                         -- Used for kind variables during
+>                                         -- inference, as well
+>         varName        :: !Name,
+>         realUnique     :: {-# UNPACK #-} !Int,
+>         varType        :: Kind,
+>         tc_tv_details  :: TcTyVarDetails
+>   }
+>
+>   | ...
+
+> Note [Kind and type variables]
+> ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+> Before kind polymorphism, TyVar were used to mean type variables. Now
+> they are use to mean kind *or* type variables. KindVar is used when we
+> know for sure that it is a kind variable. In future, we might want to
+> go over the whole compiler code to use:
+>    - TKVar   to mean kind or type variables
+>    - TypeVar to mean         type variables only
+>    - KindVar to mean kind         variables
+
+So a TyVar is... a bound type variable, like in a forall? Whereas a
+TcTyVar is a meta variable (i.e. skolem constant or unification
+variable).
+
+= TcType.hs
+
+> data TcTyVarDetails
+>   = SkolemTv      -- A skolem
+>        TcLevel    -- Level of the implication that binds it
+>        Bool       -- True <=> this skolem type variable can be overlapped
+>                   --          when looking up instances
+>                   -- See Note [Binding when looking up instances] in InstEnv
+>
+>   | FlatSkol      -- A flatten-skolem.  It stands for the TcType, and zonking
+>        TcType     -- will replace it by that type.
+>                   -- See Note [The flattening story] in TcFlatten
+>
+>   | RuntimeUnk    -- Stands for an as-yet-unknown type in the GHCi
+>                   -- interactive context
+>
+>   | MetaTv { mtv_info  :: MetaInfo
+>            , mtv_ref   :: IORef MetaDetails
+>            , mtv_tclvl :: TcLevel }  -- See Note [TcLevel and untouchable type variables]
+
+The "zonking will replace it by that type" bit contradicts the "zonkCt
+is only called on unflattened constraints" bit in source Note [zonkCt
+behavior].
+
+What's the level on SkolemTv for? ... Grepping suggests that it's only
+use is for compiler debugging. (I'm not saying that's unworthy!)
+
+> Note [TcLevel and untouchable type variables]
+> ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+> * Each unification variable (MetaTv)
+>   and each Implication
+>   has a level number (of type TcLevel)
+>
+> * INVARIANTS.  In a tree of Implications,
+>
+>     (ImplicInv) The level number of an Implication is
+>                 STRICTLY GREATER THAN that of its parent
+>
+>     (MetaTvInv) The level number of a unification variable is
+>                 LESS THAN OR EQUAL TO that of its parent
+>                 implication
+>
+> * A unification variable is *touchable* if its level number
+>   is EQUAL TO that of its immediate parent implication.
+>
+> * INVARIANT
+>     (GivenInv)  The free variables of the ic_given of an
+>                 implication are all untouchable; ie their level
+>                 numbers are LESS THAN the ic_tclvl of the implication
+
+What exactly is a variable's "parent implication"?
+
+Would a unification variable be ill-formed if its level number were
+greater than that of its parent implication?
+
+> Note [Skolem escape prevention]
+> ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+> We only unify touchable unification variables.  Because of
+> (MetaTvInv), there can be no occurrences of the variable further out,
+> so the unification can't cause the skolems to escape. Example:
+>      data T = forall a. MkT a (a->Int)
+>      f x (MkT v f) = length [v,x]
+> We decide (x::alpha), and generate an implication like
+>       [1]forall a. (a ~ alpha[0])
+> But we must not unify alpha:=a, because the skolem would escape.
+>
+> For the cases where we DO want to unify, we rely on floating the
+> equality.   Example (with same T)
+>      g x (MkT v f) = x && True
+> We decide (x::alpha), and generate an implication like
+>       [1]forall a. (Bool ~ alpha[0])
+> We do NOT unify directly, bur rather float out (if the constraint
+> does not mention 'a') to get
+>       (Bool ~ alpha[0]) /\ [1]forall a.()
+> and NOW we can unify alpha.
+>
+> The same idea of only unifying touchables solves another problem.
+> Suppose we had
+>    (F Int ~ uf[0])  /\  [1](forall a. C a => F Int ~ beta[1])
+> In this example, beta is touchable inside the implication. The
+> first solveSimpleWanteds step leaves 'uf' un-unified. Then we move inside
+> the implication where a new constraint
+>        uf  ~  beta
+> emerges. If we (wrongly) spontaneously solved it to get uf := beta,
+> the whole implication disappears but when we pop out again we are left with
+> (F Int ~ uf) which will be unified by our final zonking stage and
+> uf will get unified *once more* to (F Int).
+>
+> Note [TcLevel assignment]
+> ~~~~~~~~~~~~~~~~~~~~~~~~~
+> We arrange the TcLevels like this
+>
+>    0   Level for flatten meta-vars
+>    1   Top level
+>    2   First-level implication constraints
+>    3   Second-level implication constraints
+>    ...etc...
+>
+> The flatten meta-vars are all at level 0, just to make them untouchable.
+
+> data MetaDetails
+>   = Flexi  -- Flexi type variables unify to become Indirects
+>   | Indirect TcType
+>
+> data MetaInfo
+>    = TauTv         -- This MetaTv is an ordinary unification variable
+>                    -- A TauTv is always filled in with a tau-type, which
+>                    -- never contains any ForAlls.
+>
+>    | SigTv         -- A variant of TauTv, except that it should not be
+>                    -- unified with a type, only with a type variable
+>                    -- See Note [Signature skolems]
+>
+>    | FlatMetaTv    -- A flatten meta-tyvar
+>                    -- It is a meta-tyvar, but it is always untouchable, with level 0
+>                    -- See Note [The flattening story] in TcFlatten
+
+> Note [Signature skolems]
+~~~~~~~~~~~~~~~~~~~~~~~~
+> A SigTv is a specialised variant of TauTv, with the following invarints:
+>
+>     * A SigTv can be unified only with a TyVar,
+>       not with any other type
+>
+>     * Its MetaDetails, if filled in, will always be another SigTv
+>       or a SkolemTv
+>
+> SigTvs are only distinguished to improve error messages.
+> Consider this
+>
+>   f :: forall a. [a] -> Int
+>   f (x::b : xs) = 3
+>
+> Here 'b' is a lexically scoped type variable, but it turns out to be
+> the same as the skolem 'a'.  So we make them both SigTvs, which can unify
+> with each other.
+>
+> Similarly consider
+>   data T (a:k1) = MkT (S a)
+>   data S (b:k2) = MkS (T b)
+> When doing kind inference on {S,T} we don't want *skolems* for k1,k2,
+> because they end up unifying; we want those SigTvs again.
+>
+> SigTvs are used *only* for pattern type signatures.
+
+"A SigTv can be unified only with a TyVar". This usage refers to the
+type TyVar, not the data constructor TyVar, right?
+
+"So we make them both SigTvs" and "SigTvs are used *only* for pattern
+type signatures" seem inconsistent... "So we make them both SigTvs"
+also refers to a *skolem* a, but SigTv is a variant of TauTv... Huh?
+
+= InstEnv.hs
+
+> Note [Overlapping instances]   (NB: these notes are quite old)
+
+It's a big note, so I'm not copying it here.
+
+> Note [Binding when looking up instances]
+> ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+> When looking up in the instance environment, or family-instance environment,
+> we are careful about multiple matches, as described above in
+> Note [Overlapping instances]
+> The key_tys can contain skolem constants, and we can guarantee that those
+> are never going to be instantiated to anything, so we should not involve
+> them in the unification test.  Example:
+>         class Foo a where { op :: a -> Int }
+>         instance Foo a => Foo [a]       -- NB overlap
+>         instance Foo [Int]              -- NB overlap
+>         data T = forall a. Foo a => MkT a
+>         f :: T -> Int
+>         f (MkT x) = op [x,x]
+> The op [x,x] means we need (Foo [a]).  Without the filterVarSet we'd
+> complain, saying that the choice of instance depended on the instantiation
+> of 'a'; but of course it isn't *going* to be instantiated.
+> We do this only for isOverlappableTyVar skolems.  For example we reject
+>         g :: forall a => [a] -> Int
+>         g x = op x
+> on the grounds that the correct instance depends on the instantiation of 'a'
+
+This is also out-of-date, so a bit hard to follow: key_tys doesn't
+occur anywhere else in the repo, and there's no filterVarSet in this
+module.
+
+= TcFlatten.hs
+
+> Note [The flattening story]
+> ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+> * A CFunEqCan is either of form
+>     [G] <F xis> : F xis ~ fsk   -- fsk is a FlatSkol
+>      [W]       x : F xis ~ fmv   -- fmv is a unification variable,
+>                                  -- but untouchable,
+>                                  -- with MetaInfo = FlatMetaTv
+>   where
+>      x is the witness variable
+>      fsk/fmv is a flatten skolem
+>      xis are function-free
+>   CFunEqCans are always [Wanted], or [Given], never [Derived]
+>
+>   fmv untouchable just means that in a CTyVarEq, say,
+>        fmv ~ Int
+>   we do NOT unify fmv.
+>
+> * KEY INSIGHTS:
+>
+>    - A given flatten-skolem, fsk, is known a-priori to be equal to
+>      F xis (the LHS), with <F xis> evidence
+>
+>    - A unification flatten-skolem, fmv, stands for the as-yet-unknown
+>      type to which (F xis) will eventually reduce
+>
+> * Inert set invariant: if F xis1 ~ fsk1, F xis2 ~ fsk2
+>                        then xis1 /= xis2
+>   i.e. at most one CFunEqCan with a particular LHS
+>
+> * Each canonical [G], [W], or [WD] CFunEqCan x : F xis ~ fsk/fmv
+>   has its own distinct evidence variable x and flatten-skolem fsk/fmv.
+>   Why? We make a fresh fsk/fmv when the constraint is born;
+>   and we never rewrite the RHS of a CFunEqCan.
+>
+>   In contrast a [D] CFunEqCan shares its fmv with its partner [W],
+>   but does not "own" it.  If we reduce a [D] F Int ~ fmv, where
+>   say type instance F Int = ty, then we don't discharge fmv := ty.
+>   Rather we simply generate [D] fmv ~ ty
+>
+> * Function applications can occur in the RHS of a CTyEqCan.  No reason
+>   not allow this, and it reduces the amount of flattening that must occur.
+>
+> * Flattening a type (F xis):
+>     - If we are flattening in a Wanted/Derived constraint
+>       then create new [W] x : F xis ~ fmv
+>       else create new [G] x : F xis ~ fsk
+>       with fresh evidence variable x and flatten-skolem fsk/fmv
+>
+>     - Add it to the work list
+>
+>     - Replace (F xis) with fsk/fmv in the type you are flattening
+>
+>     - You can also add the CFunEqCan to the "flat cache", which
+>       simply keeps track of all the function applications you
+>       have flattened.
+>
+>     - If (F xis) is in the cache already, just
+>       use its fsk/fmv and evidence x, and emit nothing.
+>
+>     - No need to substitute in the flat-cache. It's not the end
+>       of the world if we start with, say (F alpha ~ fmv1) and
+>       (F Int ~ fmv2) and then find alpha := Int.  Athat will
+>       simply give rise to fmv1 := fmv2 via [Interacting rule] below
+>
+> * Canonicalising a CFunEqCan [G/W] x : F xis ~ fsk/fmv
+>     - Flatten xis (to substitute any tyvars; there are already no functions)
+>                   cos :: xis ~ flat_xis
+>     - New wanted  x2 :: F flat_xis ~ fsk/fmv
+>     - Add new wanted to flat cache
+>     - Discharge x = F cos ; x2
+>
+> * Unification flatten-skolems, fmv, ONLY get unified when either
+>     a) The CFunEqCan takes a step, using an axiom
+>     b) During un-flattening
+>   They are never unified in any other form of equality.
+>   For example [W] ffmv ~ Int  is stuck; it does not unify with fmv.
+>
+> * We *never* substitute in the RHS (i.e. the fsk/fmv) of a CFunEqCan.
+>   That would destroy the invariant about the shape of a CFunEqCan,
+>   and it would risk wanted/wanted interactions. The only way we
+>   learn information about fsk is when the CFunEqCan takes a step.
+>
+>   However we *do* substitute in the LHS of a CFunEqCan (else it
+>   would never get to fire!)
+>
+> * [Interacting rule]
+>     (inert)     [W] x1 : F tys ~ fmv1
+>     (work item) [W] x2 : F tys ~ fmv2
+>   Just solve one from the other:
+>     x2 := x1
+>     fmv2 := fmv1
+>   This just unites the two fsks into one.
+>   Always solve given from wanted if poss.
+>
+> * For top-level reductions, see Note [Top-level reductions for type functions]
+>   in TcInteract
+
+So: FlatSkols occurs in Givens and FlatMetaTvs occur in Wanteds.
+
+= TcMType.hs
+
+> Note [zonkCt behaviour]
+> zonkCt tries to maintain the canonical form of a Ct.  For example,
+>   - a CDictCan should stay a CDictCan;
+>   - a CTyEqCan should stay a CTyEqCan (if the LHS stays as a variable.).
+>   - a CHoleCan should stay a CHoleCan
+>
+> Why?, for example:
+> - For CDictCan, the @TcSimplify.expandSuperClasses@ step, which runs after the
+>   simple wanted and plugin loop, looks for @CDictCan@s. If a plugin is in use,
+>   constraints are zonked before being passed to the plugin. This means if we
+>   don't preserve a canonical form, @expandSuperClasses@ fails to expand
+>   superclasses. This is what happened in Trac #11525.
+>
+> - For CHoleCan, once we forget that it's a hole, we can never recover that info.
+>
+> NB: we do not expect to see any CFunEqCans, because zonkCt is only
+> called on unflattened constraints.
+> NB: Constraints are always re-flattened etc by the canonicaliser in
+> @TcCanonical@ even if they come in as CDictCan. Only canonical constraints that
+> are actually in the inert set carry all the guarantees. So it is okay if zonkCt
+> creates e.g. a CDictCan where the cc_tyars are /not/ function free.

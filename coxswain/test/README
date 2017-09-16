@@ -1,0 +1,21 @@
+The test suite attempts to compile all of the *.l?hs files it finds in
+test/{ill,well}-typed/. Or, if given arguments, it will interpret each
+as the path to a test file.
+
+There are these kinds of test result: Bad, Expected, Unexpected.
+
+  Bad is if the file doesn't exist under test/{ill,well}-typed, its
+  dependencies don't compile, etc. Notably it's also requires that the
+  file name be T<N>.hs where N is a non-negative number with no
+  leading 0s. (This is to encourage test authors to write comments in
+  the test file itself -- a terse filename is never sufficient!)
+
+  Expected is if it's not Bad and its compilation result does match
+  the directory prefix.
+
+  Unexpected is if it's not Bad and its compilation result does not
+  match the directory prefix.
+
+Any test file will be able to import modules from any aux/ directory
+that's a sibling of it or any of its ancestors up to but excluding
+test/.

@@ -1,0 +1,105 @@
+name: coxswain
+version: 0.1.0.0
+synopsis: Row types plugin
+description:
+
+  Tired of having to align several function arguments, tuple/sum
+  components, etc? Or of having to choose those seemingly arbitrary
+  orderings? Keep them in rows instead so the compiler can do all of
+  that for you!
+
+  .
+
+  This library provides row types that are anonymous and extensible,
+  participate as expected in type inference and overloading, and
+  enable record and variant types that have minimal overhead.
+
+  .
+
+  Like a good <https://en.wikipedia.org/wiki/Coxswain_(rowing) coxswain>
+  this library keeps rows aligned, adapts to the team's needs, and
+  doesn't weigh much!
+
+license: BSD3
+license-file: LICENSE
+author: Nicolas Frisby
+maintainer: nicolas.frisby@gmail.com
+build-type: Simple
+cabal-version: >=1.10
+
+library
+  default-language: Haskell2010
+  hs-source-dirs:src
+  other-extensions:
+    AllowAmbiguousTypes
+    BangPatterns
+    DataKinds
+    ExistentialQuantification
+    FlexibleInstances
+    GADTs
+    KindSignatures
+    LambdaCase
+    MagicHash
+    MultiParamTypeClasses
+    MultiWayIf
+    NamedFieldPuns
+    PolyKinds
+    Rank2Types
+    ScopedTypeVariables
+    TypeFamilies
+    TypeFamilyDependencies
+    TypeOperators
+    UndecidableInstances
+    ViewPatterns
+  build-depends:
+      base >=4.10 && <4.11
+    , ghc
+  other-modules:
+    Articulation
+    Col
+    E
+    Lacks
+    LowLevel
+    NormalForms
+    Plugin
+    Reduce
+    SimplifyPreds
+    SimplifyGivens
+    SimplifyWanteds
+    -- The following modules are more general than coxswain.
+    GHCAPI
+    MiniSYB
+    Simplify
+    WorkingCt
+    ZonkGivens
+  exposed-modules:
+    Coxswain
+  ghc-options:
+    -Werror
+    -Wall
+    -Wincomplete-uni-patterns
+    -Wincomplete-record-updates
+--    -Wmissing-import-lists   -- I don't want this, at least not yet.
+
+test-suite tests
+  default-language: Haskell2010
+  hs-source-dirs: test
+
+  type: exitcode-stdio-1.0
+  main-is: Main.hs
+  ghc-options:
+    -threaded
+    -Werror
+    -Wall
+    -Wincomplete-uni-patterns
+    -Wincomplete-record-updates
+
+  build-depends:
+      base >=4.10 && <4.11
+    , containers
+    , coxswain
+    , directory
+    , filepath
+    , ghc
+    , ghc-boot-th
+    , ghc-paths
