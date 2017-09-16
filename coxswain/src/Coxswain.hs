@@ -41,6 +41,7 @@ module Coxswain (
   -- * Evidence
   HasRestriction(..),
   HasCol(..),
+  HasSomeCol(..),
 
   -- * Plugin
   plugin
@@ -155,6 +156,10 @@ data HasRestriction :: Row kl kt -> Row kl kt -> kl -> kt -> * where
 -- @q@ extended with @l '.=' t@.
 data HasCol :: Row kl kt -> kl -> kt -> * where
   HasCol :: Lacks q l => HasCol (q .& l .= t) l t
+
+-- | @HasSomeCol p@ evidences that @p@ is some row extension.
+data HasSomeCol :: Row kl kt -> * where
+  HasSomeCol :: Proxy# q -> Proxy# l -> Proxy# t -> HasSomeCol (q .& l .= t)
 
 -----
 

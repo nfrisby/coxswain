@@ -14,6 +14,7 @@ module Data.Sculls.Variant (
   vconstant,
   velim,
   vpartition,
+  vproof,
   vsingleton,
   -- * Field types
   module Data.Sculls.Field,

@@ -274,17 +274,15 @@ data V (f :: kl -> kt -> *) (p :: Row kl kt) = MkV !Any !Word16
 
 instance RAll (ShowCol f) p => Show (V f (p :: Row kl kt)) where
   {-# INLINE showsPrec #-}
-  showsPrec _d v = case vproof v of IsNonEmpty{} -> showChar '<' . velim (table /$\ rdictCol proxy#) v . showChar '>'
+  showsPrec _d v = case vproof v of HasSomeCol{} -> showChar '<' . velim (table /$\ rdictCol proxy#) v . showChar '>'
     where
     table :: forall l t. (D (ShowCol f) :->: f :->: C ShowS) l t
     {-# INLINE table #-}
     table = A $ \Dict -> A $ \flt -> C $
       showsColName (proxy# :: Proxy# l) . showChar ' ' . showsPrec appPrec1 flt
 
-data IsNonEmpty :: Row kl kt -> * where
-  IsNonEmpty :: Proxy# q -> Proxy# l -> Proxy# t -> IsNonEmpty (q .& l .= t)
-
-vproof :: forall f (p :: Row kl kt). V f p -> IsNonEmpty p
+-- | A variant is itself proof that the row is non-empty.
+vproof :: forall f (p :: Row kl kt). V f p -> HasSomeCol p
 {-# INLINE vproof #-}
 vproof MkV{} = unsafeCoerce (Refl :: () :~: ())
 
@@ -367,13 +365,13 @@ vintro (MkV flt w) a = MkV (unsafeCoerce unA flt (C a)) w
 -- @vconstant  = velim . rpure (A id)@
 velim :: Short (NumCols p - 1) => R (f :->: C a) p -> V f p -> a
 {-# INLINE velim #-}
-velim (MkR sv) v@(MkV flt w) = case vproof v of IsNonEmpty{} -> unC $ unsafeCoerce unA (select sv w) flt
+velim (MkR sv) v@(MkV flt w) = case vproof v of HasSomeCol{} -> unC $ unsafeCoerce unA (select sv w) flt
 
 -- | Eliminate a record with a functional variant. (Gaster and Jones
 -- 1996)
 relim :: Short (NumCols p - 1) => V (f :->: C a) p -> R f p -> a
 {-# INLINE relim #-}
-relim v@(MkV flt w) (MkR sv) = case vproof v of IsNonEmpty{} -> unC $ unsafeCoerce unA flt (select sv w)
+relim v@(MkV flt w) (MkR sv) = case vproof v of HasSomeCol{} -> unC $ unsafeCoerce unA flt (select sv w)
 
 -- | Convert each field to a variant of the same row.
 rvariants :: forall (p :: Row kl kt) f. Short (NumCols p) => R f p -> R (C (V f p)) p
