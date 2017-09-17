@@ -159,7 +159,7 @@ data HasCol :: Row kl kt -> kl -> kt -> * where
 
 -- | @HasSomeCol p@ evidences that @p@ is some row extension.
 data HasSomeCol :: Row kl kt -> * where
-  HasSomeCol :: Proxy# q -> Proxy# l -> Proxy# t -> HasSomeCol (q .& l .= t)
+  HasSomeCol :: Lacks q l => Proxy# q -> Proxy# l -> Proxy# t -> HasSomeCol (q .& l .= t)
 
 -----
 

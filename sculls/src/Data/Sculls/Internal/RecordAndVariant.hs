@@ -284,7 +284,11 @@ instance RAll (ShowCol f) p => Show (V f (p :: Row kl kt)) where
 -- | A variant is itself proof that the row is non-empty.
 vproof :: forall f (p :: Row kl kt). V f p -> HasSomeCol p
 {-# INLINE vproof #-}
-vproof MkV{} = unsafeCoerce (Refl :: () :~: ())
+vproof (MkV _ w) = f proxy# proxy#
+  where
+  f :: forall q l. Proxy# q -> Proxy# l -> HasSomeCol p
+  f q l = case unsafeCoerce (Refl :: () :~: ()) :: p :~: (q .& l .= t) of
+    Refl -> unsafeWithLacks q l w (HasSomeCol q l proxy#)
 
 -- | Inject a value into a variant.
 mkV :: forall f (p :: Row kl kt) l t. Lacks p l => f l t -> V f (p .& l .= t)
