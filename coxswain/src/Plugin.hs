@@ -107,11 +107,13 @@ initialize clos = do
   emptyTC <- coxTyCon "Row0"
   eqTwiddleTC <- tcLookupTyCon eqTyConName
   extTC <- coxTyCon ".&"
-  plusLacksDFunId <- fmap instanceDFunId $ coxClass "Lacks_Plus" >>= lookupSoleClsInst
+  plusLacksCls <- coxClass "Lacks_Plus"
+  plusLacksDFunId <- instanceDFunId <$> lookupSoleClsInst plusLacksCls
   invocationCounter <- tcPluginIO (newIORef 0)
   knownNat16Cls <- coxClass "KnownNat16"
   lacksCls <- coxClass "Lacks"
-  minusLacksDFunId <- fmap instanceDFunId $ coxClass "Lacks_Minus" >>= lookupSoleClsInst
+  minusLacksCls <- coxClass "Lacks_Minus"
+  minusLacksDFunId <- instanceDFunId <$> lookupSoleClsInst minusLacksCls
   mkColTC <- coxTyCon ".="
   nextTC <- promoteDataCon <$> coxDataCon "NExt"
   normTC <- coxTyCon "Normalize"
@@ -122,15 +124,14 @@ initialize clos = do
   rowTC <- coxTyCon "Row"
   taskCounter <- tcPluginIO (newIORef 0)
   times2Cls <- coxClass "Times2"
-  times2DFunId <- fmap instanceDFunId $ lookupSoleClsInst times2Cls
+  times2DFunId <- instanceDFunId <$> lookupSoleClsInst times2Cls
   times2Plus1Cls <- coxClass "Times2Plus1"
-  times2Plus1DFunId <- fmap instanceDFunId $ lookupSoleClsInst times2Plus1Cls
+  times2Plus1DFunId <- instanceDFunId <$> lookupSoleClsInst times2Plus1Cls
   workingClass <- coxClass "CoxswainWorking"
-  zeroLacksDFunId <- fmap instanceDFunId $ coxClass "Lacks_Zero" >>= lookupSoleClsInst
   zeroCls <- coxClass "Zero"
-  zeroDFunId <- fmap instanceDFunId $ lookupSoleClsInst zeroCls
+  zeroDFunId <- instanceDFunId <$> lookupSoleClsInst zeroCls
 
-  let e = MkE{colTC,cloDebug,cloLogFile,cloRefreeze,cloSummarize,cloThaw,cloTrace,emptyTC,eqTwiddleTC,extTC,invocationCounter,knownNat16Cls,lacksCls,minusLacksDFunId,mkColTC,nextTC,normTC,nrowTC,numColsTC,plusLacksDFunId,renClass,restrictionTC,rowTC,taskCounter,times2Cls,times2DFunId,times2Plus1Cls,times2Plus1DFunId,workingClass,zeroCls,zeroDFunId,zeroLacksDFunId}
+  let e = MkE{colTC,cloDebug,cloLogFile,cloRefreeze,cloSummarize,cloThaw,cloTrace,emptyTC,eqTwiddleTC,extTC,invocationCounter,knownNat16Cls,lacksCls,minusLacksCls,minusLacksDFunId,mkColTC,nextTC,normTC,nrowTC,numColsTC,plusLacksCls,plusLacksDFunId,renClass,restrictionTC,rowTC,taskCounter,times2Cls,times2DFunId,times2Plus1Cls,times2Plus1DFunId,workingClass,zeroCls,zeroDFunId}
 
   dumpMany_ e "plugin arguments" (map D.text clos)
 

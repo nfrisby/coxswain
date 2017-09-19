@@ -6,11 +6,11 @@ module SimplifyWanteds (simplifyWanteds) where
 import Control.Monad (forM)
 
 import Articulation
-import Data.Bits (finiteBitSize,testBit)
 import Data.Monoid ((<>))
 import Data.Word (Word16)
 import E
 import GHCAPI
+import KnownNat16
 import LowLevel
 import NormalForms
 import Reduce (try_reduce)
@@ -169,50 +169,53 @@ reduceWanted e = go [] []
       Just predType1 -> do
         ctev1 <- newWanted (ctLoc ct) predType1
         let ev = ctEvTerm ctev1
-        let co = coxFiatCo predType1 predType0
-        let solved1 = (EvCast ev co,ct)
+        let solved1 = (coxFiatCast predType1 predType0 ev,ct)
         go (solved1:solved) (mkNonCanonical ctev1:new) ctpts
 
 newWantedEq :: Ct -> Type -> Type -> TcPluginM Ct
 newWantedEq ct lhs rhs = mkNonCanonical <$> newWanted (ctLoc ct) (mkPrimEqPred lhs rhs)
 
 updateWantedCt :: E -> Ct -> Pred_ a -> a -> Maybe (Pred_ a) -> TcPluginM SolvedNew
-updateWantedCt e ct pred0 ev1 maybe_pred1 = case maybe_pred1 of
+updateWantedCt e ct pred0 evi1 maybe_pred1 = case maybe_pred1 of
   Nothing -> case pred0 of
     ColEq lhs _ -> solveEq (frCol e lhs)
-    Lacks kl kt p l -> return $ MkSolvedNew [(doneWantedEvTerm e kl kt p l ev1,ct)] []
+    Lacks kl kt p l -> return $ MkSolvedNew [(doneWantedEvTerm e kl kt p l evi1,ct)] []
     RowEq lhs _ -> solveEq (frRow e lhs)
     where
     solveEq :: Type -> TcPluginM SolvedNew
     solveEq lhs = do
       ct' <- newWantedEq ct lhs lhs
-      let co = coxFiatCo (ctPred ct') (ctPred ct)
-      let ev = EvCast (ctEvTerm (ctEvidence ct')) co
+      let ev = coxFiatCast (ctPred ct') (ctPred ct) (ctEvTerm (ctEvidence ct'))
       return $ MkSolvedNew [(ev,ct)] [ct']
   Just pred1 -> do
+    let predType0 = frPred_ e pred0
     let predType1 = frPred_ e pred1
     ctev1 <- newWanted (ctLoc ct) predType1
-    let evterm1 = ctEvTerm ctev1
-    let evterm0 = case pred1 of
-          Lacks kl kt p l -> shiftWantedEvTerm e kl kt p l ev1 evterm1
-          _ -> evterm1
-    let predType0 = frPred_ e pred0
-    let co = coxFiatCo predType0 predType1
-    return $ MkSolvedNew [(EvCast evterm0 co,ct)] [mkNonCanonical ctev1]
+    let ev1 = ctEvTerm ctev1
+    let ev = case pred1 of
+          Lacks kl kt p l -> shiftWantedEvTerm e kl kt p l evi1 predType0 ev1
+          _ -> coxFiatCast predType1 predType0 ev1
+    return $ MkSolvedNew [(ev,ct)] [mkNonCanonical ctev1]
 
-shiftWantedEvTerm :: E -> Kind -> Kind -> Row -> Type -> Word16 -> EvTerm -> EvTerm
-shiftWantedEvTerm e kl kt p l n ev =
+shiftWantedEvTerm :: E -> Kind -> Kind -> Row -> Type -> Word16 -> Type -> EvTerm -> EvTerm
+shiftWantedEvTerm e kl kt p l n predType0 ev1 =
   if 0 == n
-  then ev
-  else EvDFunApp
+  then coxFiatCast predType1 predType0 ev1
+  else coxFiatCast middle predType0 $ EvDFunApp
     (plusLacksDFunId e)
-    [kl,kt,frRow e p,l]
-    [ev,word16EvTerm e n]
+    [kl,kt,p',l]
+    [ev1,knownNat16EvTerm e n]
+  where
+  p' = frRow e p
+  middle = classTyCon (plusLacksCls e) `mkTyConApp` [kt,kl,p',l]  -- necessary kt and kl swap
+  predType1 = frPred_ e (Lacks kl kt p l)
 
 doneWantedEvTerm :: E -> Kind -> Kind -> Row -> Type -> Word16 -> EvTerm
-doneWantedEvTerm e kl kt p l n = shiftWantedEvTerm e kl kt p l n ev0
+doneWantedEvTerm e kl kt p l n =
+  coxFiatCast predType0 predType1 (knownNat16EvTerm e n)
   where
-  ev0 = EvDFunApp (zeroLacksDFunId e) [kl,l] []
+  predType0 = knownNat16Type e
+  predType1 = frPred_ e (Lacks kl kt p l)
 
 -----
 
@@ -227,7 +230,6 @@ substWantedCt sigmaDom sigma ct1 = do
       let c = cc_class ct1
       let xis2 = map (substTy sigma) (cc_tyargs ct1)
       let ty2 = classTyCon c `mkTyConApp` xis2
-      let co = coxFiatCo ty2 ty1
       ctev2 <- newWanted (ctLoc ct1) ty2
       -- This often breaks the "xi flattened" invariant, but an
       -- immediately subsequent canonicalization pass fixes it
@@ -235,24 +237,10 @@ substWantedCt sigmaDom sigma ct1 = do
       -- plugins...)
       let ev2 = ctEvTerm ctev2
       let ct2 = CDictCan{cc_ev = ctev2,cc_class = c,cc_tyargs = xis2,cc_pend_sc = cc_pend_sc ct1}
-      return $ Just $ (EvCast ev2 co,ct2)
+      return $ Just $ (coxFiatCast ty2 ty1 ev2,ct2)
     _ -> do
       let ty2 = substTy sigma ty1
-      let co = coxFiatCo ty2 ty1
       ctev2 <- newWanted (ctLoc ct1) ty2
       let ev2 = ctEvTerm ctev2
       let ct2 = mkNonCanonical ctev2
-      return $ Just $ (EvCast ev2 co,ct2)
-
------
-
-word16EvTerm :: E -> Word16 -> EvTerm
-word16EvTerm e n = foldr cons nil bits
-  where
-  cast cls ev = EvCast ev $ coxFiatCo (mkTyConTy (classTyCon (cls e))) (mkTyConTy (classTyCon (knownNat16Cls e)))
-  bits = map (testBit n) [0..(finiteBitSize n-1)]
-  nil = cast zeroCls $ EvDFunApp (zeroDFunId e) [] []
-  cons bit sofar = cast cls $ EvDFunApp (dfunid e) [] [sofar]
-    where
-    cls = if bit then times2Plus1Cls else times2Cls
-    dfunid = if bit then times2Plus1DFunId else times2DFunId
+      return $ Just $ (coxFiatCast ty2 ty1 ev2,ct2)

@@ -48,8 +48,8 @@ expose p dflags = dflags{packageFlags = pf : packageFlags dflags}
   where
   pf = ExposePackage ("-package " ++ p) (PackageArg p) (ModRenaming True [])
 
-noWarnings :: DynFlags -> DynFlags
-noWarnings dflags = dflags{warningFlags = IntSet.empty}
+_noWarnings :: DynFlags -> DynFlags
+_noWarnings dflags = dflags{warningFlags = IntSet.empty}
 
 includePath :: String -> DynFlags -> DynFlags
 includePath path dflags = dflags{includePaths = path : includePaths dflags}
@@ -68,6 +68,8 @@ main = defaultErrorHandler defaultFatalMessager defaultFlushOut $ runGhc (Just l
 
   _ <- modifySessionDynFlags $
       id
+    . flip gopt_set Opt_DoCoreLinting
+    . flip gopt_set Opt_WarnIsError
     . languageExtension TypeOperators
     . languageExtension TypeFamilies
     . languageExtension ExplicitForAll
@@ -77,7 +79,7 @@ main = defaultErrorHandler defaultFatalMessager defaultFlushOut $ runGhc (Just l
     . plugin "Coxswain"
     . pluginOpts "Coxswain" opts
     . expose "coxswain"
-    . noWarnings
+--    . noWarnings
     . (\x -> x{hscTarget = HscInterpreted,ghcLink = LinkInMemory,ghcMode = CompManager})
 
   let e = MkE{quietly=True}

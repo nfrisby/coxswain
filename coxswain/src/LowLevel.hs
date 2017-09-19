@@ -9,6 +9,7 @@ module LowLevel (
   coxClass,
   coxDataCon,
   coxTyCon,
+  coxFiatCast,
   coxFiatCo,
   detCmpType,
   dumpSummarize,
@@ -87,7 +88,10 @@ lookupSoleClsInst cls = do
 -----
 
 coxFiatCo :: Type -> Type -> Coercion
-coxFiatCo = mkUnivCo (PluginProv "coxswain") Nominal
+coxFiatCo = mkUnivCo (PluginProv "coxswain") Representational
+
+coxFiatCast :: Type -> Type -> EvTerm -> EvTerm
+coxFiatCast t0 t1 ev0 = EvCast ev0 (coxFiatCo t0 t1)
 
 -----
 

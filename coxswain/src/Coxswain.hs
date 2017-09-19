@@ -172,12 +172,6 @@ type family Restriction (p :: Row kl kt) (ls :: Row kl kt) :: Row kl kt where
 
 -----
 
-class Lacks_Zero (l :: kl) where
-  rowInsertionOffset_Zero :: RowInsertionOffset (Row0 :: Row kl kt) l
-instance Lacks_Zero (l :: kl) where
-  {-# INLINE rowInsertionOffset_Zero #-}
-  rowInsertionOffset_Zero = MkRowInsertionOffset 0
-
 class Lacks_Plus (p :: Row kl kt) (l :: kl) where
   rowInsertionOffset_Plus :: RowInsertionOffset p l
 -- The plugin coerces this dictionary in order to increase the offset

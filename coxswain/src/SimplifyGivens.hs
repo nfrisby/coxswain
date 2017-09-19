@@ -13,6 +13,7 @@ import Data.Word (Word16)
 import Articulation
 import E
 import GHCAPI
+import KnownNat16
 import LowLevel
 import NormalForms
 import Reduce (try_reduce)
@@ -260,8 +261,7 @@ newGivenCtEvFrom ct predType1 = do
   let ctev = ctEvidence ct
   let predType0 = ctEvPred ctev
   let ev = ctEvTerm ctev
-  let co = coxFiatCo predType0 predType1
-  newGiven (ctLoc ct) predType1 (EvCast ev co)
+  newGiven (ctLoc ct) predType1 (coxFiatCast predType0 predType1 ev)
 
 updateGivenCt :: E -> Ct -> Pred_ a -> a -> Maybe (Pred_ a) -> TcPluginM SolvedNew
 updateGivenCt e ct pred0 ev1 maybe_pred1 = do
@@ -270,22 +270,25 @@ updateGivenCt e ct pred0 ev1 maybe_pred1 = do
   new <- case maybe_pred1 of
     Nothing -> return []
     Just pred1 -> do
-      let evterm1 = case pred1 of
-            Lacks kl kt p l -> shiftGivenEvTerm e kl kt p l ev1 evterm0
-            _ -> evterm0
       let predType1 = frPred_ e pred1
-      let co = coxFiatCo predType0 predType1
-      (:[]) <$> mkNonCanonical <$> newGiven (ctLoc ct) predType1 (EvCast evterm1 co)
+      let evterm1 = case pred1 of
+            Lacks kl kt p l -> shiftGivenEvTerm e kl kt p l ev1 predType1 evterm0
+            _ -> coxFiatCast predType0 predType1 evterm0
+      (:[]) <$> mkNonCanonical <$> newGiven (ctLoc ct) predType1 evterm1
   return $ MkSolvedNew [(evterm0,ct)] new
 
-shiftGivenEvTerm :: E -> Kind -> Kind -> Row -> Type -> Word16 -> EvTerm -> EvTerm
-shiftGivenEvTerm e kl kt p l n ev =
+shiftGivenEvTerm :: E -> Kind -> Kind -> Row -> Type -> Word16 -> Type -> EvTerm -> EvTerm
+shiftGivenEvTerm e kl kt p l n predType1 ev0 =
   if 0 == n
-  then ev
-  else EvDFunApp
+  then coxFiatCast predType0 predType1 ev0
+  else coxFiatCast middle predType1 $ EvDFunApp
     (minusLacksDFunId e)
-    [kl,kt,frRow e p,l,mkNumLitTy (toInteger n)]
-    [ev,EvLit (EvNum (toInteger n))]
+    [kl,kt,frRow e p,l]
+    [ev0,knownNat16EvTerm e n]
+  where
+  p' = frRow e p
+  middle = classTyCon (minusLacksCls e) `mkTyConApp` [kt,kl,p',l]  -- necessary kt and kl swap
+  predType0 = frPred_ e (Lacks kl kt p l)
 
 -----
 

@@ -37,6 +37,8 @@ data E = MkE {
   ,
     extTC :: !TyCon
   ,
+    plusLacksCls :: !Class
+  ,
     plusLacksDFunId :: !DFunId
   ,
     invocationCounter :: !(IORef Int)
@@ -45,6 +47,8 @@ data E = MkE {
     knownNat16Cls :: !Class
   ,
     lacksCls :: !Class
+  ,
+    minusLacksCls :: !Class
   ,
     minusLacksDFunId :: !DFunId
   ,
@@ -80,6 +84,4 @@ data E = MkE {
     zeroCls :: !Class
   ,
     zeroDFunId :: !DFunId
-  ,
-    zeroLacksDFunId :: !DFunId
   }

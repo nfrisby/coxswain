@@ -183,7 +183,7 @@ toPred e = (. classifyPredType) $ \case
     , rowTC e == hed
     -> Just $ MkPred () $ RowEq (toRow e t1) (toRow e t2)
 
-  ClassPred c [kl,kt,p,l]
+  ClassPred c [kt,kl,p,l]   -- With -fprint-explicit-kinds, :i Coxswain.Lacks reveals its kind arguments are kt kl.
     | lacksCls e == c -> Just $ MkPred 0 $ Lacks kl kt (toRow e p) l
 
   _ -> Nothing
@@ -191,7 +191,7 @@ toPred e = (. classifyPredType) $ \case
 frPred_ :: E -> Pred_ a -> PredType
 frPred_ e = \case
   ColEq lhs rhs -> mkPrimEqPred (frCol e lhs) (frCol e rhs)
-  Lacks kl kt p l -> classTyCon (lacksCls e) `mkTyConApp` [kl,kt,frRow e p,l]
+  Lacks kl kt p l -> classTyCon (lacksCls e) `mkTyConApp` [kt,kl,frRow e p,l]
   RowEq lhs rhs -> mkPrimEqPred (frRow e lhs) (frRow e rhs)
 
 frPred :: E -> Pred -> PredType
