@@ -25,10 +25,13 @@ zonkGivens :: [Ct] -> [(Ct,Ct)]
 zonkGivens givens0 =
   [ (ct,substCt sigma ct) | ct <- givens0 ]
   where
-  sigma = foldl snoc emptyTCvSubst (sortGivenBinds givens0)
+  allVars = unionVarSets $ map (tyCoVarsOfType . ctPred) givens0
+  in_scope = mkInScopeSet allVars
+  sigma0 = mkEmptyTCvSubst in_scope
+  sigma = foldl snoc sigma0 (sortGivenBinds givens0)
   -- Note: composeTCvSubst applies its first argument to the RHSs of
   -- its second argument.
-  snoc acc (v,rhs) = composeTCvSubst (extendTvSubst emptyTCvSubst v rhs) acc
+  snoc acc (v,rhs) = composeTCvSubst (extendTvSubstAndInScope sigma0 v rhs) acc
 
 -- | Sort so that the independent variables come last.
 sortGivenBinds :: [Ct] -> [(TyVar,Type)]

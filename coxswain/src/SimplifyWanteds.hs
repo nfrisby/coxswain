@@ -58,10 +58,12 @@ activateGivens givens = forM (filter isCTyEqCan givens) $ \ct -> do
 -- Apply the substitution recorded in the given Ren constraints.
 activateRens :: E -> [Ct] -> [Ct] -> TcPluginM SolvedNew
 activateRens e givens wanteds0 = do
+  let allVars = unionVarSets $ map (tyCoVarsOfType . ctPred) (givens ++ wanteds0)
+  let in_scope = mkInScopeSet allVars
   let (_,rens,_) = slurpRen e snd (zonkGivens givens)
   let sigmaDom = [ v | (_,(v,_)) <- rens ]
-  let sigma = renSubst rens
-  if isEmptyTCvSubst sigma
+  let sigma = renSubst in_scope rens
+  if null rens
     then return mempty
     else do
       _ <- dumpTrace e "rethaw subst" sigma
@@ -111,6 +113,9 @@ replaceRestrictionSkolems e (gs0,_,ws) = let gs1 = zonkGivens gs0 in case slurpR
   (_,_,[]) -> return mempty
   (_,rens,_) -> do
 
+    let allVars = unionVarSets $ map (tyCoVarsOfType . ctPred) (gs0 ++ ws)
+    let in_scope = mkInScopeSet allVars
+
     -- This collects all of the restriction skolems (see comment in
     -- refreezeGivens), associating each with one of the smallest
     -- restrictions that it's equal to.
@@ -134,9 +139,9 @@ replaceRestrictionSkolems e (gs0,_,ws) = let gs1 = zonkGivens gs0 in case slurpR
         where
         keep = (== fsLit "$coxswainTau") . occNameFS . nameOccName . varName
 
-      tauSigma = foldl snoc emptyTCvSubst tauVars
+      tauSigma = foldl snoc (mkEmptyTCvSubst in_scope) tauVars
         where
-        snoc acc v = extendTvSubst acc v $ mkTyVarTy $ setTyVarName v $ tidyNameOcc (varName v) (mkTyVarOccFS (fsLit "rho"))
+        snoc acc v = extendTvSubstAndInScope acc v $ mkTyVarTy $ setTyVarName v $ tidyNameOcc (varName v) (mkTyVarOccFS (fsLit "rho"))
 
     -- Create a substitution that replaces all skolm restrictions with
     -- their associated restriction.
@@ -150,7 +155,7 @@ replaceRestrictionSkolems e (gs0,_,ws) = let gs1 = zonkGivens gs0 in case slurpR
       sigmaDom = [ v2 | (v2,_,_,_) <- restrictionVars ] ++ tauVars
       sigma = foldl snoc tauSigma restrictionVars
         where
-        snoc acc (v2,v1,kcol0,kcols) = extendTvSubst acc v2 (mkRestriction v1 kcol0 kcols)
+        snoc acc (v2,v1,kcol0,kcols) = extendTvSubstAndInScope acc v2 (mkRestriction v1 kcol0 kcols)
 
     -- Apply the substitution to all Wanted constraints.
     fmap mconcat $ forM ws $ \ct0 -> substWantedCt sigmaDom sigma ct0 >>= return . \case

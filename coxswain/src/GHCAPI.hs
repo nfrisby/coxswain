@@ -9,6 +9,7 @@ module GHCAPI (
   EqRel(..),
   EvLit(..),
   EvTerm(..),
+  InScopeSet,
   Kind,
   Outputable(..),
   PredTree(..),
@@ -31,10 +32,9 @@ module GHCAPI (
   ctEvTerm,
   ctLoc,
   ctPred,
-  emptyTCvSubst,
   eqTyConName,
   eqType,
-  TcType.extendTvSubst,
+  TcType.extendTvSubstAndInScope,
   fsLit,
   getTcLevel,
   getTyVar_maybe,
@@ -47,6 +47,8 @@ module GHCAPI (
   isFlattenTyVar,
   isNumLitTy,
   isTouchableTcPluginM,
+  mkEmptyTCvSubst,
+  mkInScopeSet,
   mkNonCanonical,
   mkNumLitTy,
   mkPrimEqPred,
@@ -91,7 +93,7 @@ import TcEvidence
 import TcPluginM
 import TcRnMonad
 import TyCoRep
-import TcType (TcTyVar,extendTvSubst,isFlattenTyVar,substTy)
+import TcType (TcTyVar,extendTvSubstAndInScope,isFlattenTyVar,substTy)
 import UniqFM
 import UniqSet
 import VarSet

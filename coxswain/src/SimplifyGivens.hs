@@ -46,10 +46,10 @@ splitCts e = go [] []
 
 -----
 
-renSubst :: [(a,(TyVar,Type))] -> TCvSubst
-renSubst = foldl snoc emptyTCvSubst
+renSubst :: InScopeSet -> [(a,(TyVar,Type))] -> TCvSubst
+renSubst in_scope = foldl snoc (mkEmptyTCvSubst in_scope)
   where
-  snoc sigma (_,(v,t)) = extendTvSubst sigma v t
+  snoc sigma (_,(v,t)) = extendTvSubstAndInScope sigma v t
 
 slurpRen :: E -> (a -> Ct) -> [a] -> ([(a,TyVar)],[(a,(TyVar,Type))],[a])
 slurpRen e getCt = go [] [] []
@@ -79,6 +79,9 @@ refreezeGivens :: E -> [Ct] -> TcPluginM SolvedNew
 refreezeGivens e givens0 = let givens1 = zonkGivens givens0 in case slurpRen e snd givens1 of
   (_,_,[]) -> return mempty
   (_,rens,_) -> do
+
+    let allVars = unionVarSets $ map (tyCoVarsOfType . ctPred) givens0
+    let in_scope = mkInScopeSet allVars
 
     -- We partition the @$coxswainTau@ variables into three
     -- categories.
@@ -117,16 +120,16 @@ refreezeGivens e givens0 = let givens1 = zonkGivens givens0 in case slurpRen e s
           where
           cat1and2 = concatMap (\(v1,v2) -> [v1,v2]) eqVars ++ restrictionVars
           otherVars = allRowVars `minusUniqSet` mkUniqSet cat1and2
-          allRowVars = unionVarSets $ map (filterVarSet (isRowVar e) . tyCoVarsOfType . ctPred) givens0
+          allRowVars = filterVarSet (isRowVar e) allVars
     _ <- dumpTrace e "eq vars" eqVars
     _ <- dumpTrace e "restriction vars" restrictionVars
     _ <- dumpTrace e "dead vars" (nonDetEltsUniqSet deadVars)
     (sigmaDom,_fresh,sigma) <- let
-      snoc0 (sigmaDom,fresh,sigma) (v1,v2) = (v2:sigmaDom,fresh,extendTvSubst sigma v2 (mkTyVarTy v1))
+      snoc0 (sigmaDom,fresh,sigma) (v1,v2) = (v2:sigmaDom,fresh,extendTvSubstAndInScope sigma v2 (mkTyVarTy v1))
       snoc1 (sigmaDom,fresh,sigma) v2 = do
         v3 <- refreezeTyVar v2
-        return (v2:sigmaDom,v3:fresh,extendTvSubst sigma v2 (mkTyVarTy v3))
-      in foldM snoc1 (foldl snoc0 ([],[],emptyTCvSubst) eqVars) restrictionVars
+        return (v2:sigmaDom,v3:fresh,extendTvSubstAndInScope sigma v2 (mkTyVarTy v3))
+      in foldM snoc1 (foldl snoc0 ([],[],mkEmptyTCvSubst in_scope) eqVars) restrictionVars
 
     -- Apply the substitution to all constraints.
     fmap mconcat $ forM givens1 $ \(ct0,ct1) ->
@@ -150,6 +153,9 @@ isRowVar e v = case splitTyConApp_maybe (tyVarKind v) of
 
 thawGivens :: E -> [Ct] -> TcPluginM SolvedNew
 thawGivens e givens0 = do
+  let allVars = unionVarSets $ map (tyCoVarsOfType . ctPred) givens0
+  let in_scope = mkInScopeSet allVars
+
   -- A given @Ren v v@ means that we did not learn what the variable
   -- @v@ was from the givens of an enclosing implication. It should be
   -- rethawed, so that we might learn about it now.
@@ -178,7 +184,7 @@ thawGivens e givens0 = do
         where
         otherVars = nonDetEltsUniqSet $ allRowVars `minusUniqSet` mkUniqSet oldVars
         relevant v = isRowVar e v && not (isFlattenTyVar v)
-        allRowVars = unionVarSets $ map (filterVarSet relevant . tyCoVarsOfType . ctPred) givens0
+        allRowVars = filterVarSet relevant allVars
 
   rethawRen <- forM (map snd refls ++ renskos) $ \v -> (,) v <$> thawTyVar v
   thawRen <- forM newVars $ \v -> (,) v <$> thawTyVar v
@@ -187,9 +193,9 @@ thawGivens e givens0 = do
         -- RHSs of its second argument.
         sigma1 `composeTCvSubst` sigma0
         where
-        sigma0 = renSubst rens0
-        sigma1 = foldl snoc1 emptyTCvSubst (rethawRen ++ thawRen)
-        snoc1 acc (v1,v2) = extendTvSubst acc v1 (mkTyVarTy v2)
+        sigma0 = renSubst in_scope rens0
+        sigma1 = foldl snoc1 (mkEmptyTCvSubst in_scope) (rethawRen ++ thawRen)
+        snoc1 acc (v1,v2) = extendTvSubstAndInScope acc v1 (mkTyVarTy v2)
   let sigmaDom = map snd refls ++ renskos ++ newVars ++ map (fst . snd) rens0
   _ <- dumpTrace e "thaw subst" sigma
 
