@@ -43,6 +43,7 @@ import qualified Outputable as D
 import Panic
 import qualified TcPluginM as D (getTopEnv,tcPluginIO)
 import TyCoRep
+import TcEvidence (evTermCoercion)
 import TcPluginM
 import TcRnMonad (newMutVar)
 import TcType (MetaDetails(..),MetaInfo(..),TcTyVarDetails(..),tcTyVarLevel)
@@ -88,10 +89,26 @@ lookupSoleClsInst cls = do
 -----
 
 coxFiatCo :: Type -> Type -> Coercion
-coxFiatCo = mkUnivCo (PluginProv "coxswain") Representational
+coxFiatCo t1 t2
+  | eqType t1 t2 = mkNomReflCo t1
+  | otherwise = mkUnivCo (PluginProv "coxswain") Nominal t1 t2
 
 coxFiatCast :: Type -> Type -> EvTerm -> EvTerm
-coxFiatCast t0 t1 ev0 = EvCast ev0 (coxFiatCo t0 t1)
+coxFiatCast t0 t1 ev0
+  | Just (eq0,l0,r0) <- maybeEq t0
+  , Just (eq1,l1,r1) <- maybeEq t1
+  , not (eq1 `ltRole` eq0)  -- can downgrade eq0 to eq1
+  = EvCoercion $ downgradeRole eq1 eq0 $
+                  downgradeRole eq0 Nominal (coxFiatCo l1 l0)
+      `mkTransCo`
+                  evTermCoercion ev0
+      `mkTransCo`
+                  downgradeRole eq0 Nominal (coxFiatCo r0 r1)
+  | otherwise = EvCast ev0 $ downgradeRole Representational Nominal $ coxFiatCo t0 t1
+  where
+  maybeEq t = case classifyPredType t of
+    EqPred eq l r -> Just (eqRelRole eq,l,r)
+    _ -> Nothing
 
 -----
 
