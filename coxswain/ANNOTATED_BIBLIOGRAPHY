@@ -382,3 +382,87 @@ and
 
 -    go (IfaceCoVarCo n)          = CoVarCo <$> go_var n
 +    go (IfaceCoVarCo n)          = CoVarCo <$> go_var (fsLit $ takeWhile (/= '%') $ unpackFS n)
+
+= TyCoRep.hs
+
+> Note [Coercion holes]
+> ~~~~~~~~~~~~~~~~~~~~~~~~
+> During typechecking, constraint solving for type classes works by
+>   - Generate an evidence Id,  d7 :: Num a
+>   - Wrap it in a Wanted constraint, [W] d7 :: Num a
+>   - Use the evidence Id where the evidence is needed
+>   - Solve the constraint later
+>   - When solved, add an enclosing let-binding  let d7 = .... in ....
+>     which actually binds d7 to the (Num a) evidence
+>
+> For equality constraints we use a different strategy.  See Note [The
+> equality types story] in TysPrim for background on equality constraints.
+>   - For boxed equality constraints, (t1 ~N t2) and (t1 ~R t2), it's just
+>     like type classes above. (Indeed, boxed equality constraints *are* classes.)
+>   - But for /unboxed/ equality constraints (t1 ~R# t2) and (t1 ~N# t2)
+>     we use a different plan
+>
+> For unboxed equalities:
+>   - Generate a CoercionHole, a mutable variable just like a unification
+>     variable
+>   - Wrap the CoercionHole in a Wanted constraint; see TcRnTypes.TcEvDest
+>   - Use the CoercionHole in a Coercion, via HoleProv
+>   - Solve the constraint later
+>   - When solved, fill in the CoercionHole by side effect, instead of
+>     doing the let-binding thing
+>
+> The main reason for all this is that there may be no good place to let-bind
+> the evidence for unboxed equalities:
+>   - We emit constraints for kind coercions, to be used
+>     to cast a type's kind. These coercions then must be used in types. Because
+>     they might appear in a top-level type, there is no place to bind these
+>    (unlifted) coercions in the usual way.
+>
+>   - A coercion for (forall a. t1) ~ forall a. t2) will look like
+>        forall a. (coercion for t1~t2)
+>     But the coercion for (t1~t2) may mention 'a', and we don't have let-bindings
+>     within coercions.  We could add them, but coercion holes are easier.
+>
+> Other notes about HoleCo:
+>
+>  * INVARIANT: CoercionHole and HoleProv are used only during type checking,
+>    and should never appear in Core. Just like unification variables; a Type
+>    can contain a TcTyVar, but only during type checking. If, one day, we
+>    use type-level information to separate out forms that can appear during
+>    type-checking vs forms that can appear in core proper, holes in Core will
+>    be ruled out.
+>
+>  * The Unique carried with a coercion hole is used solely for debugging.
+>
+>  * Coercion holes can be compared for equality only like other coercions:
+>    only by looking at the types coerced.
+>
+>  * We don't use holes for other evidence because other evidence wants to
+>    be /shared/. But coercions are entirely erased, so there's little
+>    benefit to sharing.
+
+= TcEvidence.hs
+
+> Note [Coercion evidence terms]
+> ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+> A "coercion evidence term" takes one of these forms
+>    co_tm ::= EvId v           where v :: t1 ~# t2
+>            | EvCoercion co
+>            | EvCast co_tm co
+>
+> We do quite often need to get a TcCoercion from an EvTerm; see
+> 'evTermCoercion'.
+>
+> INVARIANT: The evidence for any constraint with type (t1 ~# t2) is
+> a coercion evidence term.  Consider for example
+>     [G] d :: F Int a
+> If we have
+>     ax7 a :: F Int a ~ (a ~ Bool)
+> then we do NOT generate the constraint
+>     [G] (d |> ax7 a) :: a ~ Bool
+> because that does not satisfy the invariant (d is not a coercion variable).
+> Instead we make a binding
+>     g1 :: a~Bool = g |> ax7 a
+> and the constraint
+>     [G] g1 :: a~Bool
+> See Trac [7238] and Note [Bind new Givens immediately] in TcRnTypes
