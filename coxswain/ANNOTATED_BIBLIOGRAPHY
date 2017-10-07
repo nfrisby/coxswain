@@ -356,3 +356,29 @@ So: FlatSkols occurs in Givens and FlatMetaTvs occur in Wanteds.
 > @TcCanonical@ even if they come in as CDictCan. Only canonical constraints that
 > are actually in the inert set carry all the guarantees. So it is okay if zonkCt
 > creates e.g. a CDictCan where the cc_tyars are /not/ function free.
+
+= Coercion.hs
+
+BEWARE: ppr_co TyConAppCo{} delegates *entirely* to ppr @Iface!
+
+I've been stuck for a while now on Lint failures regarding "out of
+scope" coboxes. This has been particularly difficult to debug because
+lots of the cobox variables in the dumps I could get (especially
+-ddump-* and -fprint-typechecker-elaboration) would be pretty-printed
+without their uniques!
+
+I finally figured out why: the pretty-printing routine for Coercion
+delegates to the pretty-printer for IfaceCoercion, and the conversion
+from CoVarCo to IfaceCoVarCo discards the unique. (I don't know why
+yet; guessing I'm violating an invariant somewhere?)
+
+I patched around this with the following changes.
+
+-toIfaceCoVar = occNameFS . getOccName
++toIfaceCoVar v =
++  fsLit $ occNameString (getOccName v) ++ '%' : show (getUnique v)
+
+and
+
+-    go (IfaceCoVarCo n)          = CoVarCo <$> go_var n
++    go (IfaceCoVarCo n)          = CoVarCo <$> go_var (fsLit $ takeWhile (/= '%') $ unpackFS n)
