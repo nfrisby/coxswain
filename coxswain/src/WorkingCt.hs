@@ -37,8 +37,7 @@ solveGW W ct = (EvDelayedError (ctPred ct) (fsLit "Coxswain: solveGW"),ct)
 newGW :: GW gw -> gw -> Type -> TcPluginM Ct
 newGW G gs t = do
   let ct0 = head gs
-  let co = coxFiatCo (ctPred ct0) t
-  let ev = EvCast (ctEvTerm (ctEvidence ct0)) co
+  let ev = coxFiatCast (ctPred ct0) t (ctEvTerm (ctEvidence ct0))
   mkNonCanonical <$> newGiven (ctLoc ct0) t ev
 newGW W (_,_,ws) t = mkNonCanonical <$> newWanted (ctLoc (head ws)) t
 
